@@ -46,6 +46,9 @@ export default function Page() {
     setError(null);
     setStep('extracting');
 
+    // Agrupa los documentos ya optimizados en lotes que no superen el límite práctico
+    // de la plataforma (~4 MB por solicitud). Esto es invisible para quien use la app:
+    // sube todos los documentos que quiera y la herramienta decide cuántas llamadas hacer.
     const MAX_BATCH_BYTES = 3.2 * 1024 * 1024;
     const batches: StagedFile[][] = [];
     let current: StagedFile[] = [];

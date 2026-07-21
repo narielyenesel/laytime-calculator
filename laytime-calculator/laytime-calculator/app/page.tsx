@@ -44,41 +44,70 @@ export default function Page() {
 
   const runExtraction = async () => {
     setError(null);
-
-    const totalBytes = files.reduce((sum, f) => sum + f.base64.length * 0.75, 0);
-    if (totalBytes > 4 * 1024 * 1024) {
-      setError(
-        `Los archivos pesan demasiado en conjunto (~${Math.round(totalBytes / 1024 / 1024)} MB tras codificarlos). ` +
-          'El límite práctico es de unos 4 MB en total. Comprime los PDF/imágenes (por ejemplo en ilovepdf.com/compress_pdf) o sube menos archivos a la vez.'
-      );
-      return;
-    }
-
     setStep('extracting');
-    try {
-      const res = await fetch('/api/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          files: files.map((f) => ({ name: f.name, mediaType: f.mediaType, base64: f.base64 })),
-        }),
-      });
 
-      const contentType = res.headers.get('content-type') ?? '';
-      if (!contentType.includes('application/json')) {
-        const rawText = await res.text();
-        if (res.status === 413 || /request entity too large/i.test(rawText)) {
-          throw new Error(
-            'Los archivos son demasiado pesados para procesarlos juntos (límite ~4.5 MB). Comprime los PDF/imágenes o sube menos archivos a la vez.'
-          );
+    // Agrupa los documentos ya optimizados en lotes que no superen el límite práctico
+    // de la plataforma (~4 MB por solicitud). Esto es invisible para quien use la app:
+    // sube todos los documentos que quiera y la herramienta decide cuántas llamadas hacer.
+    const MAX_BATCH_BYTES = 3.2 * 1024 * 1024;
+    const batches: StagedFile[][] = [];
+    let current: StagedFile[] = [];
+    let currentBytes = 0;
+    for (const f of files) {
+      const fBytes = f.base64.length * 0.75;
+      if (current.length > 0 && currentBytes + fBytes > MAX_BATCH_BYTES) {
+        batches.push(current);
+        current = [];
+        currentBytes = 0;
+      }
+      current.push(f);
+      currentBytes += fBytes;
+    }
+    if (current.length > 0) batches.push(current);
+
+    try {
+      const merged = {
+        vesselName: null as string | null,
+        cpDate: null as string | null,
+        charterer: null as string | null,
+        cpTermsFound: {} as any,
+        portCalls: [] as any[],
+        extractionNotes: [] as string[],
+      };
+
+      for (const batch of batches) {
+        const res = await fetch('/api/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            files: batch.map((f) => ({ name: f.name, mediaType: f.mediaType, base64: f.base64 })),
+          }),
+        });
+
+        const contentType = res.headers.get('content-type') ?? '';
+        if (!contentType.includes('application/json')) {
+          const rawText = await res.text();
+          if (res.status === 413 || /request entity too large/i.test(rawText)) {
+            throw new Error(
+              'Uno de los documentos sigue siendo muy pesado incluso tras optimizarlo automáticamente. Prueba subirlo por separado.'
+            );
+          }
+          throw new Error('El servidor devolvió una respuesta inesperada. Intenta de nuevo.');
         }
-        throw new Error('El servidor devolvió una respuesta inesperada. Intenta de nuevo o con archivos más livianos.');
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Error en la extracción');
+
+        const ex = data.extraction;
+        merged.vesselName = merged.vesselName ?? ex.vesselName ?? null;
+        merged.cpDate = merged.cpDate ?? ex.cpDate ?? null;
+        merged.charterer = merged.charterer ?? ex.charterer ?? null;
+        merged.cpTermsFound = { ...ex.cpTermsFound, ...merged.cpTermsFound };
+        merged.portCalls = merged.portCalls.concat(ex.portCalls ?? []);
+        merged.extractionNotes = merged.extractionNotes.concat(ex.extractionNotes ?? []);
       }
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Error en la extracción');
-
-      const ex = data.extraction;
+      const ex = merged;
       const terms: CPTerms = {
         ...DEFAULT_TERMS,
         termsCode: ex.cpTermsFound?.termsCode ?? DEFAULT_TERMS.termsCode,

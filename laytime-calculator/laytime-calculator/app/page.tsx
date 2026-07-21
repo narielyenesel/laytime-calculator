@@ -44,6 +44,16 @@ export default function Page() {
 
   const runExtraction = async () => {
     setError(null);
+
+    const totalBytes = files.reduce((sum, f) => sum + f.base64.length * 0.75, 0);
+    if (totalBytes > 4 * 1024 * 1024) {
+      setError(
+        `Los archivos pesan demasiado en conjunto (~${Math.round(totalBytes / 1024 / 1024)} MB tras codificarlos). ` +
+          'El límite práctico es de unos 4 MB en total. Comprime los PDF/imágenes (por ejemplo en ilovepdf.com/compress_pdf) o sube menos archivos a la vez.'
+      );
+      return;
+    }
+
     setStep('extracting');
     try {
       const res = await fetch('/api/extract', {
@@ -53,6 +63,18 @@ export default function Page() {
           files: files.map((f) => ({ name: f.name, mediaType: f.mediaType, base64: f.base64 })),
         }),
       });
+
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) {
+        const rawText = await res.text();
+        if (res.status === 413 || /request entity too large/i.test(rawText)) {
+          throw new Error(
+            'Los archivos son demasiado pesados para procesarlos juntos (límite ~4.5 MB). Comprime los PDF/imágenes o sube menos archivos a la vez.'
+          );
+        }
+        throw new Error('El servidor devolvió una respuesta inesperada. Intenta de nuevo o con archivos más livianos.');
+      }
+
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Error en la extracción');
 

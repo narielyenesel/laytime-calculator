@@ -49,8 +49,8 @@ export default function Page() {
     // Agrupa los documentos ya optimizados en lotes que no superen el límite práctico
     // de la plataforma (~4 MB por solicitud). Esto es invisible para quien use la app:
     // sube todos los documentos que quiera y la herramienta decide cuántas llamadas hacer.
-    const MAX_BATCH_BYTES = 3.2 * 1024 * 1024;
-    const MAX_FILES_PER_BATCH = 4;
+    const MAX_BATCH_BYTES = 2 * 1024 * 1024;
+    const MAX_FILES_PER_BATCH = 3;
     const batches: StagedFile[][] = [];
     let current: StagedFile[] = [];
     let currentBytes = 0;
@@ -91,12 +91,18 @@ export default function Page() {
         const contentType = res.headers.get('content-type') ?? '';
         if (!contentType.includes('application/json')) {
           const rawText = await res.text();
+          const snippet = rawText.slice(0, 200).replace(/\s+/g, ' ').trim();
           if (res.status === 413 || /request entity too large/i.test(rawText)) {
             throw new Error(
               'Uno de los documentos sigue siendo muy pesado incluso tras optimizarlo automáticamente. Prueba subirlo por separado.'
             );
           }
-          throw new Error('El servidor devolvió una respuesta inesperada. Intenta de nuevo.');
+          if (res.status === 504 || /timeout|timed out/i.test(rawText)) {
+            throw new Error(
+              'La IA tardó demasiado en responder para este lote de páginas (más de 60 segundos). Prueba subiendo menos páginas juntas, o divide el documento en partes más chicas.'
+            );
+          }
+          throw new Error(`Respuesta inesperada del servidor (código ${res.status}): ${snippet || '(sin contenido)'}`);
         }
 
         const data = await res.json();

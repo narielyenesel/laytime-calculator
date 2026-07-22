@@ -49,9 +49,25 @@ export async function POST(req: NextRequest) {
       messages: [{ role: 'user', content }],
     });
 
+    console.log(
+      'Anthropic response stop_reason:',
+      response.stop_reason,
+      '- block types:',
+      response.content.map((b) => b.type)
+    );
+
     const textBlock = response.content.find((b) => b.type === 'text');
     if (!textBlock || textBlock.type !== 'text') {
-      return NextResponse.json({ error: 'La extracción no devolvió texto.' }, { status: 502 });
+      return NextResponse.json(
+        {
+          error:
+            `La IA no devolvió texto legible (motivo: ${response.stop_reason ?? 'desconocido'}). ` +
+            (response.stop_reason === 'max_tokens'
+              ? 'Probablemente el documento es muy largo para procesarlo en un solo envío. Sube menos páginas juntas.'
+              : 'Intenta de nuevo; si persiste, prueba con menos documentos a la vez.'),
+        },
+        { status: 502 }
+      );
     }
 
     let cleaned = textBlock.text.trim();
@@ -61,8 +77,13 @@ export async function POST(req: NextRequest) {
     try {
       parsed = JSON.parse(cleaned);
     } catch (e) {
+      console.error('JSON.parse falló. Texto crudo recibido:', cleaned);
       return NextResponse.json(
-        { error: 'No se pudo interpretar la respuesta de extracción como JSON.', raw: cleaned },
+        {
+          error:
+            `No se pudo interpretar la respuesta como JSON (motivo de corte: ${response.stop_reason ?? 'desconocido'}). ` +
+            'Si el documento tiene muchas páginas, prueba subiéndolo en un grupo más chico.',
+        },
         { status: 502 }
       );
     }

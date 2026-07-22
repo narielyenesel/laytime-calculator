@@ -50,7 +50,7 @@ export default function Page() {
     // de la plataforma (~4 MB por solicitud). Esto es invisible para quien use la app:
     // sube todos los documentos que quiera y la herramienta decide cuántas llamadas hacer.
     const MAX_BATCH_BYTES = 3.2 * 1024 * 1024;
-    const MAX_FILES_PER_BATCH = 6;
+    const MAX_FILES_PER_BATCH = 4;
     const batches: StagedFile[][] = [];
     let current: StagedFile[] = [];
     let currentBytes = 0;
